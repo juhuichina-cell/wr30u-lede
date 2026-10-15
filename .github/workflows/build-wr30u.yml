@@ -145,20 +145,27 @@ jobs:
           mkdir -p "$out"
           d=bin/targets/mediatek/filogic
 
+          # 先打印源目录真实内容与官方校验清单，便于确认镜像的确切文件名
+          ls -la "$d"
+          cat "$d/sha256sums" || true
+
           cp .config "$out/wr30u-expanded.config"
-          cp -v $d/*-sysupgrade.tar "$out"/ 2>/dev/null || true
-          cp -v $d/*initramfs-kernel.bin "$out"/ 2>/dev/null || true
-          cp -v $d/sha256sums "$out"/ 2>/dev/null || true
-          cp -v $d/*.buildinfo "$out"/ 2>/dev/null || true
-          cp -v $d/*.manifest "$out"/ 2>/dev/null || true
-          cp -v $d/profiles.json "$out"/ 2>/dev/null || true
+          # 按设备名全量拷贝：该设备镜像是 IMAGE/sysupgrade.bin（内容为 tar），
+          # 不能只按 *-sysupgrade.tar 匹配，否则会漏掉
+          cp -v "$d"/*xiaomi_mi-router-wr30u* "$out"/ 2>/dev/null || true
+          cp -v "$d"/sha256sums "$out"/ 2>/dev/null || true
+          cp -v "$d"/*.buildinfo "$out"/ 2>/dev/null || true
+          cp -v "$d"/*.manifest "$out"/ 2>/dev/null || true
+          cp -v "$d"/profiles.json "$out"/ 2>/dev/null || true
 
           echo '----- collected files -----'
           ls -lh "$out"
           echo '---------------------------'
-          ls "$out"/*-sysupgrade.tar
+          find "$out" -name '*sysupgrade*' -printf '%f\n'
+          test -n "$(find "$out" -name '*sysupgrade*')"
 
       - name: Upload firmware artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: wr30u-lean-lede-${{ github.run_number }}
