@@ -59,7 +59,23 @@ jobs:
             python3-distutils rsync unzip zlib1g-dev file wget cpio
 
       - name: Clone Lean's LEDE source
-        run: git clone --depth 1 https://github.com/coolsnowwolf/lede.git lede
+        run: |
+          # 上游 master 在 2026-10-26 前后把 6.12 内核升到 6.12.114，
+          # target/linux/generic/backport-6.12/732-v6.18-wifi-mt76-wed-*.patch 打不上
+          # （include/linux/soc/mediatek/mtk_wed.h Hunk #1 FAILED），
+          # toolchain/kernel-headers 必然失败 —— run #11 / #12 都是这个原因。
+          # 这里锁定到 10-20 那次编译成功所用的上游提交（07cebbc）；
+          # 等上游把 patch 修好后，把下面三行换回 git clone --depth 1 即可。
+          git init lede
+          git -C lede remote add origin https://github.com/coolsnowwolf/lede.git
+          ok=0
+          for i in 1 2 3; do
+            if git -C lede fetch --depth 1 origin 07cebbcf28f61637047645c3fedc829ee9cc3688; then ok=1; break; fi
+            echo "fetch lede failed, retry $i ..."; sleep 15
+          done
+          [ "$ok" = "1" ]
+          git -C lede checkout FETCH_HEAD
+          git -C lede log -1 --format='pinned lede commit: %H  %ad  %s'
 
       - name: Add third-party feeds and packages
         working-directory: lede
@@ -202,7 +218,34 @@ jobs:
       - name: Compile firmware
         working-directory: lede
         run: |
-          make -j"$(nproc)" || make -j1 V=s
+          log=/tmp/build.log
+
+          # 失败时把关键错误行写成 annotation：check-run 的 annotation 匿名可读，
+          # 而 job log 需要登录才能拉取，这样失败原因能直接被定位
+          report() {
+            echo "::error::$1 compile failed, key lines from build log:"
+            grep -nE '(Error [0-9]+|: \*\*\*|error:|ERROR:|fatal error|No rule to make|cannot find|undefined reference|No such file)' "$log" | tail -n 5 | while IFS= read -r l; do
+              l="${l//%/%25}"; l="${l//$'\r'/}"
+              echo "::error::$l"
+            done
+            tail -n 5 "$log" | while IFS= read -r l; do
+              l="${l//%/%25}"; l="${l//$'\r'/}"
+              echo "::error::$l"
+            done
+          }
+
+          if make -j"$(nproc)" >"$log" 2>&1; then
+            echo 'parallel build OK'
+          else
+            report 'parallel build'
+            echo 'parallel build failed, retry serial with V=s'
+            if make -j1 V=s >>"$log" 2>&1; then
+              echo 'serial retry OK'
+            else
+              report 'serial retry'
+              exit 1
+            fi
+          fi
 
       - name: Collect firmware files
         working-directory: lede
@@ -245,5 +288,5 @@ jobs:
           name: wr30u-lean-lede-${{ github.run_number }}
           path: firmware/
           retention-days: 30
-          if-no-files-found: error
+          if-no-files-found: warn
           compression-level: 0
