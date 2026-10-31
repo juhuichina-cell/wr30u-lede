@@ -86,6 +86,14 @@ jobs:
           src-git passwall_luci https://github.com/Openwrt-Passwall/openwrt-passwall.git;main
           EOF
 
+          # Lean 默认 feeds 里带 helloworld（fw876），它也有一个同名 naiveproxy：
+          # 那个版本是 Chromium 源码编译，PKG_BUILD_DEPENDS:=gn/host，会覆盖掉
+          # passwall-packages 里的预编译版，把 gn 主机工具拉起来编译（必失败，
+          # run #13 就是 gn 编译报错）。我们需要的包全在 luci / packages /
+          # passwall / 自建 clone 里，直接去掉这个 feed。
+          sed -i '/helloworld/d' feeds.conf.default
+          cat feeds.conf.default
+
           mkdir -p package/custom
 
           # ---- OpenClash（dev 分支）----
@@ -202,6 +210,14 @@ jobs:
             grep -E '^CONFIG_PACKAGE_(shadowsocksr|luci-app-passwall_INCLUDE_ShadowsocksR)' .config
           else
             echo "OK  SSR removed"
+          fi
+
+          # helloworld 的源码版 naiveproxy 一旦混进来，就会拉 gn/host 并把编译拖死
+          if grep -qx 'CONFIG_PACKAGE_gn=y' .config; then
+            echo "::error::host package gn is selected - helloworld naiveproxy leaked in"
+            fail=1
+          else
+            echo "OK  no gn host package"
           fi
           exit $fail
 
